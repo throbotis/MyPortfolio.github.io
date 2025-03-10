@@ -1,0 +1,103 @@
+#1 #This code filters a DataFrame for Business Intelligence subscriptions, counts the number of subscriptions per hotel, and determines how many hotels have more than one subscription##
+
+    bi_df = cdf[cdf['int_product_template__revenue_recognition_category'] == 'Business Intelligence']
+    
+    # Group by hotel (using hotelinfo_id as unique identifier) and count subscription records
+    hotel_counts = bi_df.groupby('hotelinfo_id').size()
+    
+    # Count number of hotels with more than one subscription
+    multiple_subscriptions = (hotel_counts > 1).sum()
+    
+    print('Number of hotels with multiple subscriptions for Business Intelligence:', multiple_subscriptions)
+
+453
+
+#2 #The code filtered for active Business Intelligence subscriptions, checked for multiple active subscriptions per hotel, and counted those with overlapping active periods before or on the migration.##
+
+    bi_df = cdf[cdf['int_product_template__revenue_recognition_category'] == 'Business Intelligence']
+    
+    migration_start = '2024-11-01'
+    migration_end = '2024-12-01'
+    
+    # Get all months up to and including the migration period
+    migration_and_before_columns = [col for col in cdf.columns if col <= migration_end and col >= '2023-12-01']
+    
+    # check if a subscription is active (has revenue) in any month
+    def is_active_in_period(row, columns):
+        for col in columns:
+            if row[col] > 0:
+                return True
+        return False
+    
+    # Identify active subscriptions
+    bi_df['is_active'] = bi_df.apply(lambda row: is_active_in_period(row, migration_and_before_columns), axis=1)
+    
+    # Filter for active subscriptions only
+    active_bi_df = bi_df[bi_df['is_active']]
+    
+    # Group by hotel to find those with multiple active subscriptions
+    hotel_active_counts = active_bi_df.groupby('hotelinfo_id').size()
+    hotels_with_multiple_active = hotel_active_counts[hotel_active_counts > 1].index.tolist() #It creates a list of hotels that have more than one active BI subscription before the migration.
+    
+    # check if these hotels have overlapping active periods (double revenue)
+    hotels_with_migration_issues = 0
+    
+    for hotel_id in hotels_with_multiple_active:
+        hotel_subscriptions = active_bi_df[active_bi_df['hotelinfo_id'] == hotel_id] #This line isolates all active BI subscriptions for a given hotel.
+        
+        # Check each month to see if there's more than one subscription with revenue
+        for month in migration_and_before_columns:
+            monthly_revenue = hotel_subscriptions[month]
+            active_subscriptions_in_month = sum(monthly_revenue > 0)
+            
+            if active_subscriptions_in_month > 1:
+                hotels_with_migration_issues += 1 #increases the count only if a hotel has overlapping subscriptions in the same month
+                break  
+    
+    print(f"Number of hotels with migration issues (multiple active BI subscriptions on or before migration): {hotels_with_migration_issues}")
+
+315
+
+#3 #This code checks for Business Intelligence subscriptions that have gaps of less than six months in their revenue records.#
+
+    # Filter for Business Intelligence product subscriptions
+    bi_df = cdf[cdf['int_product_template__revenue_recognition_category'] == 'Business Intelligence'].copy()
+    
+    # Ensure revenue columns are properly defined (only the date columns)
+    revenue_columns = [col for col in cdf.columns if col.startswith('202')]
+    
+    # Convert these columns to numeric, ensuring non-numeric values are coerced to NaN
+    bi_df[revenue_columns] = bi_df[revenue_columns].apply(pd.to_numeric, errors='coerce')
+    
+    # Define a function to check for gaps less than 6 months
+    def has_gap_less_than_six_months(row):
+        # Get revenue values as a numpy array
+        revenues = np.array(row)
+        
+        # Find where revenue is active (greater than 0)
+        active_months = np.where(revenues > 0)[0]
+        
+        # If only one month has revenue, there’s nothing to compare it to—no second active period exists to form a gap.
+        if len(active_months) < 2:
+            return False
+        
+        # Check for gaps by looking at differences between consecutive active months
+        for i in range(len(active_months) - 1):
+            gap = active_months[i+1] - active_months[i] - 1 #Subtracting 1 ensures that we count only the gap between them, excluding the active months themselves.
+            # If there's a gap (difference > 0) and it's less than 6 months
+            if 0 < gap < 6:
+                return True
+        
+        return False
+    
+    # Apply the function to each subscription
+    bi_df['has_gap_lt6'] = bi_df[revenue_columns].apply(has_gap_less_than_six_months, axis=1)
+    
+    # Count subscriptions with gaps less than 6 months
+    cases_with_gap_lt6 = bi_df['has_gap_lt6'].sum()
+    
+    print('Number of Business Intelligence subscriptions with gaps less than 6 months:', cases_with_gap_lt6)
+
+21
+
+#4 A combination of python plots and excel analysis.
